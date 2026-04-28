@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import sqlite3
 import torch
@@ -35,6 +36,10 @@ qwen_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
 )
 qwen_processor = AutoProcessor.from_pretrained(qwen_model_id)
 
+prompt = ""
+with open("prompt.txt") as f:
+    prompt = f.read()
+
 def get_clip_embedding(image):
     inputs = clip_processor(images=image, return_tensors="pt").to(device)
     with torch.no_grad():
@@ -60,13 +65,7 @@ def get_fashion_attributes(image_path):
                 {"type": "image", "image": image_path},
                 {
                     "type": "text", 
-                    "text": (
-                        "Analyze this man's outfit in detail. "
-                        "List the specific garments (top, bottom, shoes, outerwear, accessories), "
-                        "the fit (e.g., oversized, slim, regular), and the primary materials/textures. "
-                        "Format the output as a clean comma-separated list of keywords. "
-                        "Example: turtleneck, wool coat, slim chinos, leather boots, minimal, tailored."
-                    )
+                    "text": prompt
                 },
             ],
         }
@@ -85,7 +84,7 @@ def get_fashion_attributes(image_path):
 
     # Inference
     with torch.no_grad():
-        generated_ids = qwen_model.generate(**inputs, max_new_tokens=128)
+        generated_ids = qwen_model.generate(**inputs, max_new_tokens=512) # Increased tokens for JSON
     
     generated_ids_trimmed = [
         out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
@@ -94,7 +93,25 @@ def get_fashion_attributes(image_path):
         generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
     )[0]
     
-    return output_text.strip()
+    # Robust JSON extraction
+    output_text = output_text.strip()
+    match = re.search(r'```(?:json)?(.*?)```', output_text, re.DOTALL)
+    if match:
+        json_str = match.group(1).strip()
+    else:
+        start = output_text.find('{')
+        end = output_text.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            json_str = output_text[start:end+1]
+        else:
+            json_str = output_text
+            
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON: {e}")
+        print(f"Raw output was: {output_text}")
+        return {"vibe": [], "pieces": []}
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -105,7 +122,8 @@ def init_db():
             filepath TEXT UNIQUE,
             style_label TEXT,
             embedding JSON,
-            garment_tags TEXT
+            vibe JSON,
+            pieces JSON
         )
     ''')
     cursor.execute('''
@@ -166,14 +184,16 @@ def process_images():
             if args.sample:
                 print(f"\nImage: {filepath}")
                 print(f"Style Folder: {style}")
-                print(f"Detected Attributes: {tags}")
+                print(f"Detected Attributes: {json.dumps(tags, indent=2)}")
                 print("-" * 30)
             else:
                 # Save to DB
+                vibe = tags.get("vibe", [])
+                pieces = tags.get("pieces", [])
                 cursor.execute('''
-                    INSERT INTO images (filepath, style_label, embedding, garment_tags)
-                    VALUES (?, ?, ?, ?)
-                ''', (filepath, style, json.dumps(embedding), tags))
+                    INSERT INTO images (filepath, style_label, embedding, vibe, pieces)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (filepath, style, json.dumps(embedding), json.dumps(vibe), json.dumps(pieces)))
                 conn.commit()
                 
         except Exception as e:
