@@ -36,6 +36,7 @@ qwen_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
     qwen_model_id, torch_dtype=torch.bfloat16, device_map="auto"
 )
 qwen_processor = AutoProcessor.from_pretrained(qwen_model_id)
+qwen_processor.tokenizer.padding_side = 'left'
 
 prompt = ""
 with open("prompt.txt") as f:
