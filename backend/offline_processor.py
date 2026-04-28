@@ -38,7 +38,16 @@ qwen_processor = AutoProcessor.from_pretrained(qwen_model_id)
 def get_clip_embedding(image):
     inputs = clip_processor(images=image, return_tensors="pt").to(device)
     with torch.no_grad():
-        image_features = clip_model.get_image_features(**inputs)
+        outputs = clip_model.get_image_features(**inputs)
+    
+    # Handle cases where get_image_features returns a ModelOutput object instead of a raw tensor
+    if hasattr(outputs, "image_embeds"):
+        image_features = outputs.image_embeds
+    elif isinstance(outputs, torch.Tensor):
+        image_features = outputs
+    else:
+        image_features = outputs[0]
+        
     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
     return image_features.cpu().numpy().flatten().tolist()
 
