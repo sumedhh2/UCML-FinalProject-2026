@@ -17,6 +17,7 @@ DB_PATH = "fashion_app.db"
 # --- CLI Arguments ---
 parser = argparse.ArgumentParser(description="Process fashion images with CLIP and Qwen2.5-VL")
 parser.add_argument("--sample", action="store_true", help="Process only 5 images and show results")
+parser.add_argument("--batch-size", type=int, default=4, help="Batch size for processing")
 args = parser.parse_args()
 
 # --- Models Setup ---
@@ -40,8 +41,8 @@ prompt = ""
 with open("prompt.txt") as f:
     prompt = f.read()
 
-def get_clip_embedding(image):
-    inputs = clip_processor(images=image, return_tensors="pt").to(device)
+def get_clip_embedding_batch(images):
+    inputs = clip_processor(images=images, return_tensors="pt", padding=True).to(device)
     with torch.no_grad():
         outputs = clip_model.get_image_features(**inputs)
     
@@ -54,28 +55,27 @@ def get_clip_embedding(image):
         image_features = outputs[0]
         
     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-    return image_features.cpu().numpy().flatten().tolist()
+    return image_features.cpu().numpy().tolist()
 
-def get_fashion_attributes(image_path):
-    # Prepare message for Qwen2.5-VL
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": image_path},
-                {
-                    "type": "text", 
-                    "text": prompt
-                },
-            ],
-        }
-    ]
+def get_fashion_attributes_batch(image_paths):
+    # Prepare messages for Qwen2.5-VL batch
+    messages_batch = []
+    for image_path in image_paths:
+        messages_batch.append([
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image_path},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ])
     
     # Preparation for inference
-    text = qwen_processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, video_inputs = process_vision_info(messages)
+    texts = [qwen_processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages_batch]
+    image_inputs, video_inputs = process_vision_info(messages_batch)
     inputs = qwen_processor(
-        text=[text],
+        text=texts,
         images=image_inputs,
         videos=video_inputs,
         padding=True,
@@ -84,34 +84,38 @@ def get_fashion_attributes(image_path):
 
     # Inference
     with torch.no_grad():
-        generated_ids = qwen_model.generate(**inputs, max_new_tokens=512) # Increased tokens for JSON
+        generated_ids = qwen_model.generate(**inputs, max_new_tokens=512)
     
     generated_ids_trimmed = [
         out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
     ]
-    output_text = qwen_processor.batch_decode(
+    output_texts = qwen_processor.batch_decode(
         generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-    )[0]
+    )
     
-    # Robust JSON extraction
-    output_text = output_text.strip()
-    match = re.search(r'```(?:json)?(.*?)```', output_text, re.DOTALL)
-    if match:
-        json_str = match.group(1).strip()
-    else:
-        start = output_text.find('{')
-        end = output_text.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            json_str = output_text[start:end+1]
+    results = []
+    for output_text in output_texts:
+        # Robust JSON extraction
+        output_text = output_text.strip()
+        match = re.search(r'```(?:json)?(.*?)```', output_text, re.DOTALL)
+        if match:
+            json_str = match.group(1).strip()
         else:
-            json_str = output_text
+            start = output_text.find('{')
+            end = output_text.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                json_str = output_text[start:end+1]
+            else:
+                json_str = output_text
+                
+        try:
+            results.append(json.loads(json_str))
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON: {e}")
+            print(f"Raw output was: {output_text}")
+            results.append({"vibe": [], "pieces": []})
             
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError as e:
-        print(f"Failed to parse JSON: {e}")
-        print(f"Raw output was: {output_text}")
-        return {"vibe": [], "pieces": []}
+    return results
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -167,37 +171,47 @@ def process_images():
     if args.sample:
         print(f"\n--- SAMPLE MODE: Processing 5 random images ---\n")
         all_image_data = random.sample(all_image_data, min(5, len(all_image_data)))
-    
-    for filepath, style in tqdm(all_image_data, desc="Processing Images"):
-        # Skip if already processed (only in full mode)
-        if not args.sample:
+        
+    pending_images = []
+    if not args.sample:
+        for filepath, style in all_image_data:
             cursor.execute("SELECT image_id FROM images WHERE filepath = ?", (filepath,))
-            if cursor.fetchone():
-                continue
+            if not cursor.fetchone():
+                pending_images.append((filepath, style))
+    else:
+        pending_images = all_image_data
+    
+    batch_size = args.batch_size
+    for i in tqdm(range(0, len(pending_images), batch_size), desc="Processing Batches"):
+        batch = pending_images[i:i+batch_size]
+        filepaths = [item[0] for item in batch]
+        styles = [item[1] for item in batch]
                 
         try:
             # Extract features
-            image = Image.open(filepath).convert('RGB')
-            embedding = get_clip_embedding(image)
-            tags = get_fashion_attributes(filepath)
+            images = [Image.open(fp).convert('RGB') for fp in filepaths]
+            embeddings = get_clip_embedding_batch(images)
+            tags_list = get_fashion_attributes_batch(filepaths)
             
-            if args.sample:
-                print(f"\nImage: {filepath}")
-                print(f"Style Folder: {style}")
-                print(f"Detected Attributes: {json.dumps(tags, indent=2)}")
-                print("-" * 30)
-            else:
-                # Save to DB
-                vibe = tags.get("vibe", [])
-                pieces = tags.get("pieces", [])
-                cursor.execute('''
-                    INSERT INTO images (filepath, style_label, embedding, vibe, pieces)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (filepath, style, json.dumps(embedding), json.dumps(vibe), json.dumps(pieces)))
+            for filepath, style, embedding, tags in zip(filepaths, styles, embeddings, tags_list):
+                if args.sample:
+                    print(f"\nImage: {filepath}")
+                    print(f"Style Folder: {style}")
+                    print(f"Detected Attributes: {json.dumps(tags, indent=2)}")
+                    print("-" * 30)
+                else:
+                    # Save to DB
+                    vibe = tags.get("vibe", [])
+                    pieces = tags.get("pieces", [])
+                    cursor.execute('''
+                        INSERT INTO images (filepath, style_label, embedding, vibe, pieces)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (filepath, style, json.dumps(embedding), json.dumps(vibe), json.dumps(pieces)))
+            if not args.sample:
                 conn.commit()
                 
         except Exception as e:
-            print(f"Error processing {filepath}: {e}")
+            print(f"Error processing batch starting with {filepaths[0]}: {e}")
 
     conn.close()
     if not args.sample:
