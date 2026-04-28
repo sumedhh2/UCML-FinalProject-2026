@@ -6,3 +6,5 @@ Pillow
 SQLAlchemy
 tqdm
 pydantic
+accelerate
+qwen-vl-utils
