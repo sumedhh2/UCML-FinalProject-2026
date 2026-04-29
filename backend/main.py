@@ -28,6 +28,11 @@ class Interaction(BaseModel):
 def cosine_similarity(v1, v2):
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
+def parse_embedding(raw_emb):
+    if isinstance(raw_emb, str):
+        return np.array(json.loads(raw_emb), dtype=np.float32).flatten()
+    return np.frombuffer(raw_emb, dtype=np.float32)
+
 # --- Endpoints ---
 
 @app.post("/users/create")
@@ -99,7 +104,7 @@ def get_recommendations(user_id: int, batch_size: int = 10):
         
         # --- Visual Scoring Setup (Embeddings) ---
         cursor.execute(f"SELECT embedding FROM images WHERE image_id IN ({liked_placeholders})", liked_image_ids)
-        liked_embeddings = [np.array(json.loads(row["embedding"])).flatten() for row in cursor.fetchall()]
+        liked_embeddings = [parse_embedding(row["embedding"]) for row in cursor.fetchall()]
         
         try:
             from sklearn.cluster import KMeans
@@ -116,7 +121,7 @@ def get_recommendations(user_id: int, batch_size: int = 10):
         if disliked_image_ids:
             dis_placeholders = ','.join(['?'] * len(disliked_image_ids))
             cursor.execute(f"SELECT embedding FROM images WHERE image_id IN ({dis_placeholders})", disliked_image_ids)
-            dis_embs = [np.array(json.loads(r["embedding"])).flatten() for r in cursor.fetchall()]
+            dis_embs = [parse_embedding(r["embedding"]) for r in cursor.fetchall()]
             if dis_embs:
                 disliked_centroid = np.mean(dis_embs, axis=0)
 
@@ -147,7 +152,7 @@ def get_recommendations(user_id: int, batch_size: int = 10):
         scored_images = []
         for img in unseen_images:
             img_id = img["image_id"]
-            img_emb = np.array(json.loads(img["embedding"])).flatten()
+            img_emb = parse_embedding(img["embedding"])
             
             # Visual Score (Max sim to any liked centroid)
             visual_score = max(cosine_similarity(c, img_emb) for c in liked_centroids)
