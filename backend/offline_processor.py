@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # --- Configuration ---
 DATASET_DIR = "../pinterest_images"
-DB_PATH = "fashion_app.db"
+DB_PATH = "fashion_app2.db"
 
 # --- CLI Arguments ---
 parser = argparse.ArgumentParser(description="Process fashion images with CLIP and Qwen2.5-VL")
@@ -126,9 +126,32 @@ def init_db():
             image_id INTEGER PRIMARY KEY AUTOINCREMENT,
             filepath TEXT UNIQUE,
             style_label TEXT,
-            embedding JSON,
-            vibe JSON,
-            pieces JSON
+            embedding JSON
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS image_vibes (
+            vibe_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id INTEGER,
+            vibe TEXT,
+            FOREIGN KEY(image_id) REFERENCES images(image_id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS image_pieces (
+            piece_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id INTEGER,
+            category TEXT,
+            item_name TEXT,
+            color TEXT,
+            fit TEXT,
+            material TEXT,
+            pattern TEXT,
+            condition TEXT,
+            detail TEXT,
+            visibility TEXT,
+            extra_attributes JSON,
+            FOREIGN KEY(image_id) REFERENCES images(image_id)
         )
     ''')
     cursor.execute('''
@@ -202,12 +225,38 @@ def process_images():
                     print("-" * 30)
                 else:
                     # Save to DB
-                    vibe = tags.get("vibe", [])
-                    pieces = tags.get("pieces", [])
                     cursor.execute('''
-                        INSERT INTO images (filepath, style_label, embedding, vibe, pieces)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (filepath, style, json.dumps(embedding), json.dumps(vibe), json.dumps(pieces)))
+                        INSERT INTO images (filepath, style_label, embedding)
+                        VALUES (?, ?, ?)
+                    ''', (filepath, style, json.dumps(embedding)))
+                    image_id = cursor.lastrowid
+                    
+                    vibe_list = tags.get("vibe", [])
+                    for v in vibe_list:
+                        cursor.execute('''
+                            INSERT INTO image_vibes (image_id, vibe) VALUES (?, ?)
+                        ''', (image_id, str(v).lower()))
+                        
+                    pieces_list = tags.get("pieces", [])
+                    known_keys = {"category", "item", "color", "fit", "material", "pattern", "condition", "detail", "visibility"}
+                    for piece in pieces_list:
+                        extra = {k: v for k, v in piece.items() if k not in known_keys}
+                        cursor.execute('''
+                            INSERT INTO image_pieces (image_id, category, item_name, color, fit, material, pattern, condition, detail, visibility, extra_attributes)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            image_id, 
+                            piece.get("category"), 
+                            piece.get("item"), 
+                            piece.get("color"), 
+                            piece.get("fit"), 
+                            piece.get("material", "none"), 
+                            piece.get("pattern", "none"),
+                            piece.get("condition", "none"),
+                            piece.get("detail", "none"),
+                            piece.get("visibility", "full"),
+                            json.dumps(extra)
+                        ))
             if not args.sample:
                 conn.commit()
                 
