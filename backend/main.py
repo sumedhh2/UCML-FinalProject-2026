@@ -9,7 +9,18 @@ import random
 import numpy as np
 from collections import Counter
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Fashion Aesthetic Backend")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For development, allow all. You can restrict to ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 DB_PATH = "../fashion_app2.db"
 
