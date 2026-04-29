@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.npm/
+
+# OS
+.DS_Store
+
+# Images manifest (generated)
+frontend/src/data/images.js
+frontend/public/images
