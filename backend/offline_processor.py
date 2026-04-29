@@ -9,6 +9,7 @@ from PIL import Image
 from transformers import CLIPProcessor, CLIPModel, Qwen2_5_VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 from tqdm import tqdm
+import numpy as np
 
 # --- Configuration ---
 DATASET_DIR = "../pinterest_images"
@@ -45,18 +46,13 @@ with open("prompt.txt") as f:
 def get_clip_embedding_batch(images):
     inputs = clip_processor(images=images, return_tensors="pt", padding=True).to(device)
     with torch.no_grad():
-        outputs = clip_model.get_image_features(**inputs)
-    
-    # Handle cases where get_image_features returns a ModelOutput object instead of a raw tensor
-    if hasattr(outputs, "image_embeds"):
-        image_features = outputs.image_embeds
-    elif isinstance(outputs, torch.Tensor):
-        image_features = outputs
-    else:
-        image_features = outputs[0]
+        # Bypass get_image_features to ensure we always get the projected 512-dim pooled output
+        vision_outputs = clip_model.vision_model(pixel_values=inputs['pixel_values'])
+        pooled_output = vision_outputs[1]  # (batch_size, 768)
+        image_features = clip_model.visual_projection(pooled_output)  # (batch_size, 512)
         
     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-    return image_features.cpu().numpy().tolist()
+    return image_features.cpu().numpy()
 
 def get_fashion_attributes_batch(image_paths):
     # Prepare messages for Qwen2.5-VL batch
@@ -126,7 +122,7 @@ def init_db():
             image_id INTEGER PRIMARY KEY AUTOINCREMENT,
             filepath TEXT UNIQUE,
             style_label TEXT,
-            embedding JSON
+            embedding BLOB
         )
     ''')
     cursor.execute('''
@@ -225,10 +221,12 @@ def process_images():
                     print("-" * 30)
                 else:
                     # Save to DB
+                    # Convert to float32 blob for massive space savings
+                    embedding_blob = embedding.astype(np.float32).tobytes()
                     cursor.execute('''
                         INSERT INTO images (filepath, style_label, embedding)
                         VALUES (?, ?, ?)
-                    ''', (filepath, style, json.dumps(embedding)))
+                    ''', (filepath, style, embedding_blob))
                     image_id = cursor.lastrowid
                     
                     vibe_list = tags.get("vibe", [])
