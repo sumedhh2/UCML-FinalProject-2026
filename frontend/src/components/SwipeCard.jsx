@@ -26,7 +26,7 @@ const SwipeCard = ({ image, onSwipeLeft, onSwipeRight, isTop, direction }) => {
             <img 
               src={image.url} 
               alt={image.aesthetic} 
-              className="size-full object-cover"
+              className="size-full object-cover object-top"
             />
           </div>
         </div>
@@ -60,12 +60,12 @@ const SwipeCard = ({ image, onSwipeLeft, onSwipeRight, isTop, direction }) => {
     >
       <div className="size-full bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col border border-neutral-100 relative group">
         <div className="flex-1 relative overflow-hidden">
-          <img 
-            src={image.url} 
-            alt={image.aesthetic} 
-            className="size-full object-cover select-none"
-            draggable="false"
-          />
+            <img 
+              src={image.url} 
+              alt={image.aesthetic} 
+              className="size-full object-cover object-top select-none"
+              draggable="false"
+            />
           
           {/* Overlay Labels (Swipe feedback) */}
           <motion.div 

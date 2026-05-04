@@ -3,7 +3,8 @@ import { Heart } from 'lucide-react';
 
 const LikedHistory = ({ outfits }) => {
   return (
-    <div className="w-full md:w-80 lg:w-96 bg-white border-t md:border-t-0 md:border-l border-slate-200 flex flex-col max-h-64 md:max-h-full">
+    <div className="w-full md:w-80 lg:w-96 bg-white border-t md:border-t-0 md:border-l border-slate-200 
+                    flex flex-col h-[40vh] md:h-full flex-shrink-0">
       <div className="p-4 md:p-6 border-b border-slate-200 flex-shrink-0">
         <div className="flex items-center gap-2">
           <Heart className="w-4 h-4 md:w-5 md:h-5 text-green-500 fill-green-500" />
@@ -12,7 +13,7 @@ const LikedHistory = ({ outfits }) => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 md:p-4 min-h-0">
+      <div className="flex-1 overflow-y-auto p-3 md:p-4 min-h-0 custom-scrollbar">
         {outfits.length === 0 ? (
           <div className="text-center py-8 md:py-12">
             <Heart className="w-8 h-8 md:w-12 md:h-12 text-slate-300 mx-auto mb-2 md:mb-3" />
@@ -21,7 +22,7 @@ const LikedHistory = ({ outfits }) => {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2 md:gap-3">
-            {outfits.map((outfit, index) => (
+            {[...outfits].reverse().map((outfit, index) => (
               <div
                 key={`${outfit.id}-${index}`}
                 className="relative aspect-[3/4] rounded-lg md:rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-shadow group cursor-pointer"

@@ -40,6 +40,19 @@
   @apply px-1.5 py-0.5 rounded border border-neutral-200 bg-neutral-50 text-[10px] font-bold;
 }
 
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}
+
 /* Maintain compatibility with the locked body state */
 body.locked {
   height: 100vh;
